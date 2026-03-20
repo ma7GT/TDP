@@ -1,0 +1,289 @@
+# SPDX-License-Identifier: CC0-1.0
+# TDP — Training Description Protocol v0.1
+# Schema: exercise_library
+# https://tdp-spec.dev/schemas/exercise-library
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://tdp-spec.dev/schemas/v0.1/exercise-library"
+title: TDP Exercise Library
+description: >
+  Référentiel global d'exercices et de groupes d'équivalences.
+  Étend free-exercise-db (Unlicense) via le champ tdp_ext.
+  Licence de ce schéma : CC0 1.0 Universal.
+
+type: object
+required: [tdp_version, kind, exercises]
+additionalProperties: false
+
+properties:
+
+  tdp_version:
+    type: string
+    pattern: '^\d+\.\d+$'
+    description: Version du protocole TDP (ex. "0.1")
+
+  kind:
+    type: string
+    const: exercise_library
+
+  exercises:
+    type: array
+    minItems: 1
+    items:
+      $ref: "#/$defs/exercise_entry"
+
+  equivalence_groups:
+    type: array
+    items:
+      $ref: "#/$defs/equivalence_group"
+
+# ─────────────────────────────────────────────
+$defs:
+
+  # ── Enum centralisés ──────────────────────
+
+  equipment_id:
+    type: string
+    enum:
+      - barbell
+      - dumbbell
+      - bench_flat
+      - bench_incline
+      - bench_decline
+      - cable
+      - cable_machine
+      - pull_up_bar
+      - dip_bar
+      - resistance_band
+      - kettlebell
+      - trap_bar
+      - ez_bar
+      - smith_machine
+      - leg_press_machine
+      - chest_press_machine
+      - lat_pulldown_machine
+      - seated_row_machine
+      - leg_extension_machine
+      - leg_curl_machine
+      - hack_squat_machine
+      - glute_ham_developer
+      - hyperextension_bench
+      - ab_wheel
+      - weight_plate
+      - bodyweight
+      - trx
+      - box
+      - foam_roller
+
+  load_type:
+    type: string
+    enum:
+      - kg_absolute
+      - lbs_absolute
+      - percentage_1rm
+      - rpe
+      - bodyweight
+      - band_light
+      - band_medium
+      - band_heavy
+      - swf_ref        # bridge vers un bloc SWF (cardio)
+
+  laterality:
+    type: string
+    enum: [bilateral, unilateral, alternating]
+
+  movement_pattern:
+    type: string
+    enum:
+      - horizontal_push
+      - horizontal_pull
+      - vertical_push
+      - vertical_pull
+      - squat
+      - hinge
+      - lunge
+      - carry
+      - rotation
+      - isolation
+      - cardio
+      - olympic
+
+  joint_stress_item:
+    type: string
+    pattern: '^(shoulder|elbow|wrist|knee|hip|ankle|spine|neck)_(low|medium|high)$'
+    description: >
+      Format : <articulation>_<niveau>.
+      Exemples : shoulder_medium, knee_high, wrist_low.
+
+  # ── Exercise entry ─────────────────────────
+
+  exercise_entry:
+    type: object
+    required: [id, name, tdp_ext]
+    additionalProperties: true   # préserve les champs free-exercise-db non listés
+    properties:
+
+      # Champs free-exercise-db natifs (null-safe)
+      id:
+        type: string
+        description: Identifiant unique (compatible free-exercise-db)
+
+      name:
+        type: string
+
+      force:
+        type: [string, "null"]
+        enum: [push, pull, static, null]
+
+      level:
+        type: [string, "null"]
+        enum: [beginner, intermediate, expert, null]
+
+      mechanic:
+        type: [string, "null"]
+        enum: [compound, isolation, null]
+
+      equipment:
+        type: [string, "null"]
+        description: Champ texte libre (free-exercise-db). Voir tdp_ext.equipment_required pour la version normalisée.
+
+      primaryMuscles:
+        type: array
+        items: { type: string }
+
+      secondaryMuscles:
+        type: array
+        items: { type: string }
+
+      category:
+        type: string
+
+      instructions:
+        type: array
+        items: { type: string }
+
+      images:
+        type: array
+        items: { type: string }
+
+      # ── Extension TDP ──
+      tdp_ext:
+        type: object
+        required: [equipment_required, laterality, movement_pattern]
+        additionalProperties: false
+        properties:
+
+          equipment_required:
+            type: array
+            items: { $ref: "#/$defs/equipment_id" }
+            description: Matériel indispensable (au moins un élément)
+
+          equipment_optional:
+            type: array
+            items: { $ref: "#/$defs/equipment_id" }
+            default: []
+            description: Matériel qui améliore l'exercice mais non bloquant
+
+          laterality:
+            $ref: "#/$defs/laterality"
+
+          movement_pattern:
+            $ref: "#/$defs/movement_pattern"
+
+          joint_stress:
+            type: array
+            items: { $ref: "#/$defs/joint_stress_item" }
+            default: []
+            description: Contraintes articulaires — utile pour substitution sécurisée (blessures)
+
+          free_exercise_db_id:
+            type: [string, "null"]
+            description: Lien explicite vers l'ID free-exercise-db si différent du champ id
+
+          sport_tags:
+            type: array
+            items: { type: string }
+            default: []
+            description: Sports pour lesquels l'exercice est pertinent (extensibilité multi-sport)
+
+  # ── Equivalence group ─────────────────────
+
+  equivalence_group:
+    type: object
+    required: [id, name, target_movement, primary_muscles, entries, substitution_policy]
+    additionalProperties: false
+    properties:
+
+      id:
+        type: string
+
+      name:
+        type: string
+
+      target_movement:
+        $ref: "#/$defs/movement_pattern"
+
+      primary_muscles:
+        type: array
+        items: { type: string }
+        minItems: 1
+
+      entries:
+        type: array
+        minItems: 2
+        items:
+          type: object
+          required: [exercise_id, similarity_score, equipment_required]
+          additionalProperties: false
+          properties:
+            exercise_id:
+              type: string
+            similarity_score:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+              description: >
+                1.0 = référence canonique du groupe.
+                Scores indicatifs : ≥0.85 substitut direct,
+                0.60–0.84 substitut acceptable, <0.60 dernier recours.
+            equipment_required:
+              type: array
+              items: { $ref: "#/$defs/equipment_id" }
+            notes:
+              type: string
+
+      substitution_policy:
+        type: object
+        required: [strategy]
+        additionalProperties: false
+        properties:
+
+          strategy:
+            type: string
+            enum: [ordered_fallback, best_available, manual]
+            description: >
+              ordered_fallback : suit l'ordre des entries par similarity_score décroissant.
+              best_available   : choisit le meilleur exercice selon l'inventaire matériel fourni.
+              manual           : aucune substitution automatique, intervention humaine requise.
+
+          if_missing:
+            type: object
+            additionalProperties:
+              type: object
+              required: [prefer]
+              properties:
+                prefer:   { type: string }
+                then:     { type: string }
+                fallback: { type: string }
+            description: >
+              Clés = equipment_id manquant.
+              Valeurs = chaîne de fallback ordonnée.
+
+          load_adjustment:
+            type: object
+            additionalProperties:
+              type: [number, "null"]
+            description: >
+              Facteur multiplicatif de charge lors d'une substitution.
+              Ex : Dumbbell_Bench_Press: 0.88 → réduire la charge de 12%.
+              null = pas de conversion possible (poids de corps, élastiques).

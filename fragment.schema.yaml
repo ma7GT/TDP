@@ -1,0 +1,417 @@
+# SPDX-License-Identifier: CC0-1.0
+# TDP — Training Description Protocol v0.1
+# Schema: fragment (union discriminée par fragment_type)
+# https://tdp-spec.dev/schemas/fragment
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://tdp-spec.dev/schemas/v0.1/fragment"
+title: TDP Fragment
+description: >
+  Unité échangeable TDP. Un fragment est autonome et importable
+  indépendamment de son contexte parent.
+  Les apps déclarent leur niveau de conformité (tdp_conformance_level)
+  et ignorent les fragment_types qu'elles ne supportent pas.
+  Licence : CC0 1.0 Universal.
+
+type: object
+required: [tdp_version, kind, fragment_type, fragment_id, fragment_meta]
+additionalProperties: false
+
+properties:
+
+  tdp_version:
+    type: string
+    pattern: '^\d+\.\d+$'
+
+  kind:
+    type: string
+    const: fragment
+
+  fragment_type:
+    type: string
+    enum: [set, exercise_block, session, mesocycle, plan]
+    description: >
+      Granularité du fragment.
+      Niveaux de conformité attendus par les consommateurs :
+        minimal  → session uniquement
+        standard → session + mesocycle
+        full     → tous les types y compris plan
+
+  fragment_id:
+    type: string
+    description: Identifiant unique du fragment (slugifié, stable)
+
+  fragment_meta:
+    $ref: "#/$defs/fragment_meta"
+
+# Dispatch selon fragment_type
+if:
+  properties:
+    fragment_type: { const: set }
+then:
+  required: [set]
+  properties:
+    set: { $ref: "#/$defs/set" }
+
+if:
+  properties:
+    fragment_type: { const: exercise_block }
+then:
+  required: [exercise_block]
+  properties:
+    exercise_block: { $ref: "#/$defs/exercise_block" }
+
+if:
+  properties:
+    fragment_type: { const: session }
+then:
+  required: [exercises]
+  properties:
+    context: { $ref: "#/$defs/session_context" }
+    exercises:
+      type: array
+      minItems: 1
+      items: { $ref: "#/$defs/exercise_block" }
+
+if:
+  properties:
+    fragment_type: { const: mesocycle }
+then:
+  required: [mesocycle]
+  properties:
+    mesocycle: { $ref: "#/$defs/mesocycle" }
+
+if:
+  properties:
+    fragment_type: { const: plan }
+then:
+  required: [macrocycles]
+  properties:
+    macrocycles:
+      type: array
+      minItems: 1
+      items: { $ref: "#/$defs/macrocycle" }
+
+# ─────────────────────────────────────────────
+$defs:
+
+  # ── Fragment metadata ─────────────────────
+
+  fragment_meta:
+    type: object
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+      author:
+        type: [string, "null"]
+      created_at:
+        type: string
+        format: date
+      updated_at:
+        type: [string, "null"]
+        format: date
+      version:
+        type: string
+        default: "1"
+        description: Version du fragment (pour gestion des mises à jour)
+      tags:
+        type: array
+        items: { type: string }
+        default: []
+      level:
+        type: [string, "null"]
+        enum: [beginner, intermediate, advanced, null]
+      sport:
+        type: string
+        default: strength_training
+        description: >
+          Extensibilité multi-sport. Valeurs réservées :
+          strength_training, crossfit, endurance, yoga, mobility, custom
+      equipment_required:
+        type: array
+        items: { type: string }
+        default: []
+      muscle_focus:
+        type: array
+        items: { type: string }
+        default: []
+      estimated_duration_min:
+        type: [integer, "null"]
+        minimum: 1
+      reusable:
+        type: boolean
+        default: true
+        description: >
+          Si true, ce fragment peut être référencé par d'autres plans
+          via fragment_ref sans être copié.
+      tdp_conformance_level:
+        type: string
+        enum: [minimal, standard, full]
+        default: minimal
+        description: >
+          Niveau de conformité TDP minimum attendu du consommateur.
+          minimal  → supporte session
+          standard → supporte session + mesocycle
+          full     → supporte le plan complet
+
+  # ── Set ───────────────────────────────────
+
+  set:
+    type: object
+    required: [set_number, type, reps, load_type]
+    additionalProperties: false
+    properties:
+      set_number:
+        type: integer
+        minimum: 1
+      type:
+        type: string
+        enum: [warmup, working, drop_set, rest_pause, myo_rep, amrap, failure]
+      reps:
+        oneOf:
+          - type: integer
+            minimum: 1
+            description: Nombre de répétitions fixe
+          - type: string
+            pattern: '^\d+-\d+$'
+            description: Fourchette de reps (ex. "8-12")
+      reps_max:
+        type: [integer, "null"]
+        description: Utilisé pour les sets AMRAP (autant que possible)
+      load:
+        type: [number, "null"]
+        description: >
+          Valeur numérique de la charge.
+          Interprétation dépend de load_type.
+          null si load_type est bodyweight.
+      load_type:
+        type: string
+        enum:
+          - kg_absolute
+          - lbs_absolute
+          - percentage_1rm
+          - rpe
+          - bodyweight
+          - band_light
+          - band_medium
+          - band_heavy
+          - swf_ref
+      rir:
+        type: [integer, "null"]
+        minimum: 0
+        maximum: 10
+        description: Reps In Reserve (0 = échec musculaire)
+      tempo:
+        type: [string, "null"]
+        pattern: '^[X0-9]{4}$'
+        description: >
+          Format ECCO : Excentrique / pause-Bas / Concentrique / pause-haut.
+          X = explosif. Exemples : "3010", "20X0", "3111".
+      rest_s:
+        type: integer
+        minimum: 0
+        description: Repos en secondes après ce set (0 pour supersets enchaînés)
+      swf_ref:
+        type: [string, "null"]
+        description: >
+          Référence vers un bloc SWF externe (bridge cardio).
+          Requis si load_type = swf_ref.
+
+  # ── Exercise block ────────────────────────
+
+  exercise_block:
+    type: object
+    required: [exercise_id, order, sets]
+    additionalProperties: false
+    properties:
+      exercise_id:
+        type: string
+        description: Référence à un exercise_entry dans l'exercise_library
+      order:
+        type: integer
+        minimum: 1
+      superset_id:
+        type: [string, "null"]
+        description: >
+          Identifiant partagé entre les exercices d'un même superset.
+          null si exercice isolé.
+      notes:
+        type: [string, "null"]
+      override_equipment:
+        type: [string, "null"]
+        description: >
+          Force l'utilisation d'un equipment_id spécifique,
+          court-circuitant la substitution_policy du groupe d'équivalences.
+      sets:
+        type: array
+        minItems: 1
+        items: { $ref: "#/$defs/set" }
+
+  # ── Session context (optionnel) ───────────
+
+  session_context:
+    type: object
+    additionalProperties: false
+    properties:
+      parent_mesocycle_id:
+        type: [string, "null"]
+      week_number:
+        type: [integer, "null"]
+        minimum: 1
+      day_of_week:
+        type: [string, "null"]
+        enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday, null]
+
+  # ── Session reference (dans microcycle) ───
+
+  session_ref:
+    type: object
+    required: [fragment_ref, day_of_week]
+    additionalProperties: false
+    properties:
+      fragment_ref:
+        type: string
+        description: fragment_id d'un fragment de type session
+      day_of_week:
+        type: string
+        enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+      overrides:
+        type: object
+        additionalProperties: false
+        description: >
+          Surcharge locale sans modifier le fragment source.
+          Toutes les propriétés sont optionnelles.
+        properties:
+          volume_multiplier:
+            type: number
+            minimum: 0.1
+            maximum: 3.0
+            description: Multiplie le nombre de sets de tous les exercices
+          rir_offset:
+            type: integer
+            minimum: -5
+            maximum: 5
+            description: Décale le RIR de tous les sets (+2 pour décharge, -1 pour intensification)
+          load_multiplier:
+            type: number
+            minimum: 0.1
+            maximum: 2.0
+            description: Multiplie la charge de tous les sets
+          notes:
+            type: string
+
+  # ── Microcycle (semaine) ──────────────────
+
+  microcycle:
+    type: object
+    required: [week_number, sessions]
+    additionalProperties: false
+    properties:
+      week_number:
+        type: integer
+        minimum: 1
+      overload_factor:
+        type: number
+        minimum: 0.1
+        maximum: 2.0
+        default: 1.0
+        description: Facteur de surcharge progressif (1.0 = semaine de référence)
+      is_deload:
+        type: boolean
+        default: false
+      sessions:
+        type: array
+        minItems: 1
+        items: { $ref: "#/$defs/session_ref" }
+
+  # ── Mesocycle ─────────────────────────────
+
+  mesocycle:
+    type: object
+    required: [id, name, weeks, type, progression_model, microcycles]
+    additionalProperties: false
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      weeks:
+        type: integer
+        minimum: 1
+        maximum: 52
+      type:
+        type: string
+        enum:
+          - hypertrophy
+          - strength
+          - power
+          - endurance_muscular
+          - deload
+          - peaking
+          - recomposition
+          - custom
+      progression_model:
+        type: string
+        enum:
+          - linear_volume
+          - double_progression
+          - rpe_autoregulation
+          - wave_loading
+          - percentage_based
+          - custom
+        description: >
+          linear_volume      : +1 set/semaine par exercice
+          double_progression : augmente les reps jusqu'au max, puis charge
+          rpe_autoregulation : charge ajustée à la séance selon RPE cible
+          wave_loading       : vagues d'intensité (ex. 3/2/1)
+          percentage_based   : % de 1RM recalculés chaque semaine
+      deload_week:
+        type: [integer, "null"]
+        minimum: 1
+        description: Numéro de la semaine de décharge dans ce mésocycle
+      microcycles:
+        type: array
+        minItems: 1
+        items: { $ref: "#/$defs/microcycle" }
+
+  # ── Macrocycle ────────────────────────────
+
+  macrocycle:
+    type: object
+    required: [id, duration_weeks, goal, mesocycles]
+    additionalProperties: false
+    properties:
+      id:
+        type: string
+      name:
+        type: [string, "null"]
+      duration_weeks:
+        type: integer
+        minimum: 1
+      goal:
+        type: string
+        enum:
+          - hypertrophy
+          - strength
+          - power
+          - weight_loss
+          - recomposition
+          - endurance
+          - athletic_performance
+          - rehabilitation
+          - custom
+      phase:
+        type: [string, "null"]
+        enum:
+          - off_season
+          - pre_season
+          - in_season
+          - post_season
+          - transition
+          - null
+      mesocycles:
+        type: array
+        minItems: 1
+        items: { $ref: "#/$defs/mesocycle" }

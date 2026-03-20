@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: CC0-1.0
+# TDP — Training Description Protocol v0.1
+# Spec : Niveaux de conformité & interopérabilité
+# https://tdp-spec.dev/conformance
+
+title: "TDP Conformance & Interoperability Specification"
+version: "0.1"
+license: "CC0-1.0"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. NIVEAUX DE CONFORMITÉ
+# ─────────────────────────────────────────────────────────────────────────────
+conformance_levels:
+
+  minimal:
+    description: >
+      App basique de suivi d'entraînement (type Strong, Hevy, notes papier numérisées).
+      Capacité minimale : importer et afficher une séance complète.
+    must_support:
+      - fragment_type: session
+        fields: [exercises, sets, reps, load, load_type, rest_s]
+    may_ignore:
+      - fragment_type: [mesocycle, plan]
+      - fields: [tempo, rir, superset_id, overrides, context]
+    import_behavior: >
+      À l'import d'un fragment plan ou mesocycle, l'app extrait uniquement
+      les sessions et ignore la structure parente sans erreur.
+
+  standard:
+    description: >
+      App coach ou suivi périodisé (gestion de blocs, suivi de progression).
+    must_support:
+      - fragment_type: [session, mesocycle]
+        fields:
+          session: [exercises, sets, reps, load, load_type, rest_s, rir, tempo, superset_id]
+          mesocycle: [weeks, type, progression_model, microcycles, session_ref, overrides]
+    may_ignore:
+      - fragment_type: [plan]
+      - fields: [macrocycle, phase]
+    import_behavior: >
+      À l'import d'un fragment plan, l'app extrait les mésocycles
+      et les sessions associées. Ignore la structure macrocycle.
+
+  full:
+    description: >
+      App IA, plateforme de coaching avancée, générateur de programmes.
+    must_support:
+      - fragment_type: [set, exercise_block, session, mesocycle, plan]
+        fields: all
+    import_behavior: >
+      Consomme l'intégralité du fragment sans perte d'information.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. RÈGLES D'IMPORT / EXPORT
+# ─────────────────────────────────────────────────────────────────────────────
+exchange_rules:
+
+  versioning:
+    policy: >
+      Un consommateur TDP v0.x doit accepter les fragments produits
+      par n'importe quelle version TDP v0.x (compatibilité mineure).
+      Les champs inconnus doivent être ignorés sans erreur (forward compatibility).
+    unknown_fields: ignore   # JAMAIS rejeter un fragment pour un champ inconnu
+
+  fragment_identity:
+    policy: >
+      Un fragment_id est stable et unique chez son producteur.
+      À l'import, si un fragment_id existe déjà, l'app compare le champ
+      version de fragment_meta et propose une mise à jour (non destructive).
+    conflict_resolution: ask_user   # ask_user | overwrite | keep_both | keep_existing
+
+  session_reuse:
+    policy: >
+      Un fragment session avec reusable: true peut être référencé
+      par plusieurs plans via fragment_ref sans duplication des données.
+      Les overrides sont appliqués à la volée ; le fragment source reste intact.
+    override_scope: local   # Les overrides ne modifient pas le fragment source
+
+  partial_import:
+    policy: >
+      Toute app DOIT pouvoir importer un fragment dont le fragment_type
+      est supérieur à son niveau de conformité, en extrayant les sous-fragments
+      qu'elle supporte. Elle NE DOIT PAS rejeter le fichier entier.
+    example: >
+      Une app minimal recevant un fragment plan extrait toutes les sessions
+      et les importe individuellement.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. SUBSTITUTION D'EXERCICES
+# ─────────────────────────────────────────────────────────────────────────────
+substitution_rules:
+
+  resolution_algorithm:
+    description: >
+      Quand l'utilisateur déclare son inventaire matériel, le moteur de
+      substitution résout automatiquement les exercise_id non disponibles.
+    steps:
+      1: >
+        Identifier les exercise_id dont equipment_required
+        n'est pas couvert par l'inventaire utilisateur.
+      2: >
+        Trouver l'equivalence_group contenant cet exercise_id.
+      3: >
+        Selon la substitution_policy.strategy :
+          ordered_fallback : parcourir if_missing[equipment_manquant]
+                             dans l'ordre (prefer → then → fallback).
+          best_available   : choisir l'entry avec le similarity_score
+                             le plus élevé dont l'équipement est disponible.
+          manual           : marquer l'exercice comme non résolu,
+                             retourner une liste de suggestions.
+      4: >
+        Appliquer le load_adjustment multiplicatif à tous les sets
+        du bloc concerné.
+      5: >
+        Annoter le fragment exporté avec substitution_log.
+
+  substitution_log:
+    description: >
+      Champ optionnel ajouté par les apps qui ont effectué des substitutions.
+      Permet la traçabilité et la réversion.
+    schema:
+      type: array
+      items:
+        type: object
+        required: [original_exercise_id, substituted_exercise_id, reason, load_adjustment]
+        properties:
+          original_exercise_id: { type: string }
+          substituted_exercise_id: { type: string }
+          similarity_score: { type: number }
+          reason: { type: string }   # ex. "barbell non disponible"
+          load_adjustment: { type: [number, "null"] }
+
+  joint_stress_safety:
+    description: >
+      Si l'utilisateur a déclaré une blessure ou contrainte articulaire,
+      le moteur DOIT exclure les substituts dont joint_stress contient
+      le niveau high pour l'articulation concernée.
+    example: >
+      Blessure épaule déclarée → exclure tous les exercices avec
+      shoulder_high dans joint_stress, même si similarity_score élevé.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. BRIDGE SWF (CARDIO)
+# ─────────────────────────────────────────────────────────────────────────────
+swf_bridge:
+  description: >
+    Un exercise_block avec load_type: swf_ref intègre un bloc d'entraînement
+    cardio structuré au format SWF (Structured Workout Format).
+    Cela permet d'inclure des échauffements cardio, des finishers HIIT,
+    ou des séances hybrides dans un plan TDP sans redéfinir le format cardio.
+  fields:
+    swf_ref: >
+      Chemin ou URL vers un fichier SWF valide.
+      Peut être relatif (./warmup-cardio.swf.json)
+      ou absolu (https://...).
+  apps_behavior: >
+    Une app qui ne supporte pas SWF DOIT ignorer les blocs swf_ref
+    sans erreur et PEUT afficher un message "bloc cardio non supporté".
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. EXTENSIBILITÉ MULTI-SPORT
+# ─────────────────────────────────────────────────────────────────────────────
+extensibility:
+  sport_field: >
+    Le champ fragment_meta.sport permet d'identifier les fragments
+    destinés à d'autres disciplines. Les valeurs réservées sont définies
+    dans le registre TDP. Les valeurs custom: préfixées sont libres.
+  reserved_sports:
+    - strength_training
+    - crossfit
+    - endurance
+    - cycling
+    - running
+    - swimming
+    - yoga
+    - mobility
+    - olympic_weightlifting
+    - powerlifting
+    - calisthenics
+  custom_sports: >
+    Tout sport non listé peut être référencé avec le préfixe custom:
+    (ex. custom:surf_training). Les registres communautaires peuvent
+    promouvoir des valeurs custom: vers le registre officiel via PR.
+  movement_pattern_extension: >
+    Les movement_pattern non couverts par l'enum standard peuvent être
+    étendus via custom: (ex. custom:paddle_stroke).
+    L'enum standard est mis à jour à chaque version mineure de TDP.
